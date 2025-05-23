@@ -1,15 +1,25 @@
-
 import React, { useState, useRef, useEffect } from 'react';
-import { Play, Pause, RotateCcw, Clock } from 'lucide-react';
+import { Play, Pause, RotateCcw, Clock, BarChart2, Upload, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Slider } from '@/components/ui/slider';
 import { toast } from '@/hooks/use-toast';
-
-interface WatchedInterval {
-  start: number;
-  end: number;
-}
+import { useVideoProgress } from '@/hooks/use-video-progress';
+import { WatchedInterval } from '@/lib/videoProgressTracker';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface VideoPlayerProps {
   videoUrl: string;
@@ -19,53 +29,34 @@ interface VideoPlayerProps {
 
 const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoUrl, title, description }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const progressBarRef = useRef<HTMLDivElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [watchedIntervals, setWatchedIntervals] = useState<WatchedInterval[]>([]);
-  const [progressPercentage, setProgressPercentage] = useState(0);
-  const [lastPosition, setLastPosition] = useState(0);
-  const [isTracking, setIsTracking] = useState(false);
   const [isSeeking, setIsSeeking] = useState(false);
-  const trackingStartTime = useRef<number>(0);
-  const localStorageKey = `videoProgress-${videoUrl.split('/').pop()}`;
-
-  // Load saved progress on component mount
-  useEffect(() => {
-    const savedData = localStorage.getItem(localStorageKey);
-    if (savedData) {
-      const { intervals, lastPos } = JSON.parse(savedData);
-      setWatchedIntervals(intervals || []);
-      setLastPosition(lastPos || 0);
-      
-      if (lastPos > 0) {
-        toast({
-          title: "Progress Restored",
-          description: `Resuming from ${formatTime(lastPos)}`,
-        });
-      }
+  const [hoverTime, setHoverTime] = useState<number | null>(null);
+  const [hoverPosition, setHoverPosition] = useState<{ x: number, y: number } | null>(null);
+  const videoId = videoUrl.split('/').pop() || '';
+  
+  // Use our custom hook for tracking progress
+  const {
+    progressPercentage,
+    lastPosition,
+    watchedIntervals,
+    startTracking,
+    stopTracking,
+    handleSeek: handleProgressSeek,
+    reset: resetProgress,
+    exportProgressData,
+    importProgressData
+  } = useVideoProgress({
+    videoId,
+    duration,
+    onProgressUpdate: (data) => {
+      // Optional callback when progress is updated
+      updateWatchedSegmentsVisual(data.intervals);
     }
-  }, [localStorageKey]);
-
-  // Save progress to localStorage whenever intervals change
-  useEffect(() => {
-    if (watchedIntervals.length > 0) {
-      const dataToSave = {
-        intervals: watchedIntervals,
-        lastPos: currentTime
-      };
-      localStorage.setItem(localStorageKey, JSON.stringify(dataToSave));
-    }
-  }, [watchedIntervals, currentTime, localStorageKey]);
-
-  // Calculate progress percentage
-  useEffect(() => {
-    if (duration > 0) {
-      const totalWatched = calculateUniqueWatchedTime(watchedIntervals);
-      const percentage = (totalWatched / duration) * 100;
-      setProgressPercentage(Math.min(percentage, 100));
-    }
-  }, [watchedIntervals, duration]);
+  });
 
   // Resume video at last position when duration is loaded
   useEffect(() => {
@@ -75,36 +66,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoUrl, title, description 
     }
   }, [duration, lastPosition]);
 
-  const mergeIntervals = (intervals: WatchedInterval[]): WatchedInterval[] => {
-    if (intervals.length === 0) return [];
-    
-    const sorted = [...intervals].sort((a, b) => a.start - b.start);
-    const merged: WatchedInterval[] = [sorted[0]];
-    
-    for (let i = 1; i < sorted.length; i++) {
-      const current = sorted[i];
-      const lastMerged = merged[merged.length - 1];
-      
-      if (current.start <= lastMerged.end) {
-        lastMerged.end = Math.max(lastMerged.end, current.end);
-      } else {
-        merged.push(current);
-      }
-    }
-    
-    return merged;
-  };
-
-  const calculateUniqueWatchedTime = (intervals: WatchedInterval[]): number => {
-    const merged = mergeIntervals(intervals);
-    return merged.reduce((total, interval) => total + (interval.end - interval.start), 0);
-  };
+  // Update the visual representation of watched segments
+  useEffect(() => {
+    updateWatchedSegmentsVisual(watchedIntervals);
+  }, [watchedIntervals, duration]);
 
   const handlePlayPause = () => {
     if (videoRef.current) {
       if (isPlaying) {
         videoRef.current.pause();
-        stopTracking();
+        stopTracking(currentTime);
       } else {
         videoRef.current.play()
           .catch(error => {
@@ -115,34 +86,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoUrl, title, description 
             });
             console.error("Video playback error:", error);
           });
-        startTracking();
+        startTracking(currentTime);
       }
       setIsPlaying(!isPlaying);
-    }
-  };
-
-  const startTracking = () => {
-    if (!isTracking) {
-      trackingStartTime.current = currentTime;
-      setIsTracking(true);
-    }
-  };
-
-  const stopTracking = () => {
-    if (isTracking && trackingStartTime.current !== currentTime) {
-      // Only add interval if at least 1 second was watched
-      if (Math.abs(trackingStartTime.current - currentTime) >= 1) {
-        const newInterval: WatchedInterval = {
-          start: Math.min(trackingStartTime.current, currentTime),
-          end: Math.max(trackingStartTime.current, currentTime)
-        };
-        
-        setWatchedIntervals(prev => {
-          const updated = [...prev, newInterval];
-          return mergeIntervals(updated);
-        });
-      }
-      setIsTracking(false);
     }
   };
 
@@ -152,10 +98,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoUrl, title, description 
       setCurrentTime(time);
       
       // Check for seeking (jumping around)
-      if (isTracking && Math.abs(time - currentTime) > 1) {
+      if (isPlaying && Math.abs(time - currentTime) > 1) {
         // User seeked, stop current tracking and start new
-        stopTracking();
-        trackingStartTime.current = time;
+        stopTracking(currentTime);
+        startTracking(time);
       }
     }
   };
@@ -167,7 +113,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoUrl, title, description 
   };
 
   const handleVideoEnded = () => {
-    stopTracking();
+    stopTracking(currentTime);
     setIsPlaying(false);
   };
 
@@ -175,33 +121,25 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoUrl, title, description 
     if (videoRef.current) {
       setIsSeeking(true);
       
-      // Stop current tracking
-      if (isTracking) {
-        stopTracking();
-      }
-      
       const seekTime = (newValue[0] / 100) * duration;
       videoRef.current.currentTime = seekTime;
       setCurrentTime(seekTime);
       
-      // Start new tracking after seeking
-      trackingStartTime.current = seekTime;
+      // Use our hook's handleSeek method
+      handleProgressSeek(seekTime);
       
       // Reset seeking state after a short delay
       setTimeout(() => {
         setIsSeeking(false);
         if (isPlaying) {
-          setIsTracking(true);
+          startTracking(seekTime);
         }
       }, 100);
     }
   };
 
-  const resetProgress = () => {
-    setWatchedIntervals([]);
-    setProgressPercentage(0);
-    setLastPosition(0);
-    localStorage.removeItem(localStorageKey);
+  const handleReset = () => {
+    resetProgress();
     if (videoRef.current) {
       videoRef.current.currentTime = 0;
       setCurrentTime(0);
@@ -222,6 +160,110 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoUrl, title, description 
     return `${percentage.toFixed(1)}%`;
   };
 
+  // Handle mouse hover on progress bar
+  const handleProgressBarMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (progressBarRef.current && duration > 0) {
+      const rect = progressBarRef.current.getBoundingClientRect();
+      const position = (e.clientX - rect.left) / rect.width;
+      const time = position * duration;
+      
+      setHoverTime(time);
+      setHoverPosition({ x: e.clientX, y: rect.top });
+    }
+  };
+
+  const handleProgressBarMouseLeave = () => {
+    setHoverTime(null);
+    setHoverPosition(null);
+  };
+
+  // Check if a time position is within watched intervals
+  const isTimeWatched = (time: number): boolean => {
+    return watchedIntervals.some(interval => time >= interval.start && time <= interval.end);
+  };
+
+  // Update visual representation of watched segments
+  const updateWatchedSegmentsVisual = (intervals: WatchedInterval[]) => {
+    if (progressBarRef.current && duration > 0) {
+      // Clear existing segments
+      const existingSegments = progressBarRef.current.querySelectorAll('.watched-segment');
+      existingSegments.forEach(segment => segment.remove());
+      
+      // Create new segments for each watched interval
+      intervals.forEach(interval => {
+        const startPercent = (interval.start / duration) * 100;
+        const endPercent = (interval.end / duration) * 100;
+        const width = endPercent - startPercent;
+        
+        const segment = document.createElement('div');
+        segment.className = 'watched-segment absolute h-full bg-green-500 opacity-70 pointer-events-none';
+        segment.style.left = `${startPercent}%`;
+        segment.style.width = `${width}%`;
+        
+        // Add data attributes for tooltip content
+        segment.dataset.start = formatTime(interval.start);
+        segment.dataset.end = formatTime(interval.end);
+        
+        progressBarRef.current?.appendChild(segment);
+      });
+    }
+  };
+
+  // Export progress data as JSON file
+  const handleExportProgress = () => {
+    const dataStr = exportProgressData();
+    const dataUri = `data:application/json;charset=utf-8,${encodeURIComponent(dataStr)}`;
+    
+    const exportFileDefaultName = `video-progress-${videoId}.json`;
+    
+    const linkElement = document.createElement('a');
+    linkElement.setAttribute('href', dataUri);
+    linkElement.setAttribute('download', exportFileDefaultName);
+    linkElement.click();
+    
+    toast({
+      title: "Progress Exported",
+      description: "Your viewing progress has been exported as JSON.",
+    });
+  };
+
+  // Import progress data from JSON file
+  const handleImportProgress = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json';
+    
+    input.onchange = (e) => {
+      const target = e.target as HTMLInputElement;
+      if (target.files && target.files.length > 0) {
+        const file = target.files[0];
+        const reader = new FileReader();
+        
+        reader.onload = (event) => {
+          const content = event.target?.result as string;
+          const success = importProgressData(content);
+          
+          if (success) {
+            toast({
+              title: "Progress Imported",
+              description: "Your viewing progress has been successfully imported.",
+            });
+          } else {
+            toast({
+              title: "Import Failed",
+              description: "The imported data is not compatible with this video.",
+              variant: "destructive",
+            });
+          }
+        };
+        
+        reader.readAsText(file);
+      }
+    };
+    
+    input.click();
+  };
+
   return (
     <div className="w-full rounded-lg overflow-hidden shadow-xl bg-card">
       {/* Video Container */}
@@ -231,8 +273,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoUrl, title, description 
           className="w-full aspect-video"
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}
-          onPlay={() => startTracking()}
-          onPause={() => stopTracking()}
+          onPlay={() => startTracking(currentTime)}
+          onPause={() => stopTracking(currentTime)}
           onEnded={handleVideoEnded}
         >
           <source src={videoUrl} type="video/mp4" />
@@ -242,17 +284,45 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoUrl, title, description 
         {/* Controls Overlay */}
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
           <div className="flex flex-col gap-2">
-            {/* Progress bar */}
+            {/* Progress bar with watched segments visualization */}
             <div className="flex items-center gap-2 text-white">
               <span className="text-xs font-mono">{formatTime(currentTime)}</span>
-              <Slider
-                value={[duration > 0 ? (currentTime / duration) * 100 : 0]}
-                min={0}
-                max={100}
-                step={0.1}
-                onValueChange={handleSeek}
-                className="flex-1 cursor-pointer"
-              />
+              <TooltipProvider>
+                <div 
+                  className="flex-1 relative h-2" 
+                  ref={progressBarRef}
+                  onMouseMove={handleProgressBarMouseMove}
+                  onMouseLeave={handleProgressBarMouseLeave}
+                >
+                  <Slider
+                    value={[duration > 0 ? (currentTime / duration) * 100 : 0]}
+                    min={0}
+                    max={100}
+                    step={0.1}
+                    onValueChange={handleSeek}
+                    className="cursor-pointer"
+                  />
+                  {/* Watched segments will be added here dynamically */}
+                  
+                  {/* Hover tooltip */}
+                  {hoverTime !== null && hoverPosition !== null && (
+                    <div 
+                      className="absolute bg-black/80 text-white text-xs py-1 px-2 rounded pointer-events-none transform -translate-x-1/2"
+                      style={{ 
+                        left: `${(hoverTime / duration) * 100}%`,
+                        top: '-28px'
+                      }}
+                    >
+                      <div className="flex flex-col items-center">
+                        <span>{formatTime(hoverTime)}</span>
+                        <span className="text-[10px]">
+                          {isTimeWatched(hoverTime) ? "Watched" : "Not watched"}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </TooltipProvider>
               <span className="text-xs font-mono">{formatTime(duration)}</span>
             </div>
             
@@ -275,11 +345,71 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoUrl, title, description 
               
               <div className="flex-1" />
               
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-white/30 text-black bg-white hover:bg-white/90 mr-2 [&:hover>*]:text-black [&>*]:text-black [&:hover]:text-black"
+                  >
+                    <BarChart2 className="w-4 h-4 mr-2" />
+                    Analytics
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-[425px]">
+                  <DialogHeader>
+                    <DialogTitle>Viewing Analytics</DialogTitle>
+                    <DialogDescription>
+                      Detailed breakdown of your viewing progress
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="py-4">
+                    <h4 className="text-sm font-medium mb-2">Watched Segments</h4>
+                    <div className="max-h-[200px] overflow-y-auto space-y-2">
+                      {watchedIntervals.map((interval, index) => (
+                        <div key={index} className="text-sm bg-muted p-2 rounded-md flex justify-between">
+                          <span>{formatTime(interval.start)} - {formatTime(interval.end)}</span>
+                          <span>{formatTime(interval.end - interval.start)}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-4 space-y-2">
+                      <div className="flex justify-between">
+                        <span className="text-sm">Total Unique Time:</span>
+                        <span className="text-sm font-medium">
+                          {formatTime(watchedIntervals.reduce((total, interval) => 
+                            total + (interval.end - interval.start), 0)
+                          )}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-sm">Video Duration:</span>
+                        <span className="text-sm font-medium">{formatTime(duration)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-sm">Progress:</span>
+                        <span className="text-sm font-medium">{formatProgress(progressPercentage)}</span>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 mt-4">
+                      <Button className="flex-1" onClick={handleExportProgress}>
+                        <Download className="w-4 h-4 mr-2" />
+                        Export
+                      </Button>
+                      <Button className="flex-1" onClick={handleImportProgress} variant="outline">
+                        <Upload className="w-4 h-4 mr-2" />
+                        Import
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+              
               <Button
-                onClick={resetProgress}
+                onClick={handleReset}
                 size="sm"
                 variant="outline"
-                className="border-white/30 text-white hover:bg-white/10"
+                className="border-white/30 text-black bg-white hover:bg-white/90 [&:hover>*]:text-black [&>*]:text-black [&:hover]:text-black"
               >
                 <RotateCcw className="w-4 h-4 mr-2" />
                 Reset Progress
