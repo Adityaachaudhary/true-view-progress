@@ -294,12 +294,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoUrl, title, description 
                   onMouseMove={handleProgressBarMouseMove}
                   onMouseLeave={handleProgressBarMouseLeave}
                 >
-                  <Slider
-                    value={[duration > 0 ? (currentTime / duration) * 100 : 0]}
-                    min={0}
-                    max={100}
-                    step={0.1}
-                    onValueChange={handleSeek}
+              <Slider
+                value={[duration > 0 ? (currentTime / duration) * 100 : 0]}
+                min={0}
+                max={100}
+                step={0.1}
+                onValueChange={handleSeek}
                     className="cursor-pointer"
                   />
                   {/* Watched segments will be added here dynamically */}

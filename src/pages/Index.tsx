@@ -13,9 +13,9 @@ const Index = () => {
       <Navbar />
       <div className="container py-6">
         <p className="text-lg text-slate-600 dark:text-slate-300 max-w-2xl mx-auto mb-8">
-          Advanced progress tracking that measures actual learning engagement.
-          Only unique video segments count toward your progress.
-        </p>
+            Advanced progress tracking that measures actual learning engagement.
+            Only unique video segments count toward your progress.
+          </p>
 
         <div className="grid lg:grid-cols-1 gap-8">
           {/* Video Player Section */}
