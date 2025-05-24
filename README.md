@@ -2,13 +2,11 @@
 
 An advanced video progress tracking system that intelligently measures actual learning engagement through unique segment tracking.
 
-![Main Interface](./docs/images/interface-1.png)
 
 ## Overview
 
 True View Progress is designed to provide accurate video learning progress by only counting unique segments watched, preventing inflation from rewatching the same content. The system implements smart tracking that ensures only genuinely watched content contributes to the progress percentage.
 
-![Features Explanation](./docs/images/interface-2.png)
 
 ## Features
 
@@ -20,7 +18,7 @@ True View Progress is designed to provide accurate video learning progress by on
 - **Auto-Save**: Progress is automatically saved between sessions
 - **Resume Playback**: Automatically continues from where you left off
 
-![Analytics View](./docs/images/interface-4.png)
+
 
 ## Technical Stack
 
